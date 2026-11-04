@@ -20,6 +20,8 @@ const el = {
 const HOME = { note: { l: 6, t: 22, w: 40, h: 62 }, term: { l: 54, t: 26, w: 40, h: 62 } };
 const TAB_H = 6.6;
 const TITLES = { note: 'groceries.txt - Notepad', term: 'Windows PowerShell' };
+// Rainbow tabs, as in the app: every window keeps its own colour.
+const COLOURS = { note: ['#DC2626', '#fbd5d5'], term: ['#1D4ED8', '#d3defb'] };
 
 let playing = !reduce;
 let visible = true;
@@ -41,6 +43,8 @@ function setTabs(tabs, ids, active) {
     const t = document.createElement('span');
     t.className = `tab${id === active ? ' on' : ''}`;
     t.dataset.id = id;
+    t.style.setProperty('--c', COLOURS[id][0]);
+    t.style.setProperty('--c-soft', COLOURS[id][1]);
     const ico = document.createElement('i');
     ico.className = `ico ico-${id}`;
     t.append(ico, TITLES[id]);
