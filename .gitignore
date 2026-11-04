@@ -5,3 +5,4 @@ releases/
 *.user
 .vs/
 .vercel/
+.env*
