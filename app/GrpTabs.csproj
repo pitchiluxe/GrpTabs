@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>Assets\GrpTabs.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>GrpTabs</AssemblyName>
+    <RootNamespace>GrpTabs</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>GrpTabs</Product>
+    <Company>Erick Omari</Company>
+    <Authors>Erick Omari</Authors>
+    <Copyright>Copyright (c) 2026 Erick Omari</Copyright>
+    <Description>GrpTabs: drag one window's tab onto another to group them into tabs.</Description>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- No WinForms designer here: every form is built in code. -->
+    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Velopack" Version="1.2.161" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\GrpTabs.ico" LogicalName="GrpTabs.ico" />
+    <EmbeddedResource Include="Assets\logo.png" LogicalName="logo.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GrpTabs.Tests" />
+  </ItemGroup>
+
+</Project>

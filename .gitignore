@@ -1,0 +1,7 @@
+bin/
+obj/
+publish/
+releases/
+*.user
+.vs/
+.vercel/

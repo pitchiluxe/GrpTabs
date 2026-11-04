@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GrpTabs: tabs for every window on Windows</title>
+  <meta name="description" content="GrpTabs is a free Windows app by Erick Omari. Drag one window's tab onto another and they become one tabbed window. Click to switch, drag out to split." />
+  <meta name="author" content="Erick Omari" />
+  <meta name="theme-color" content="#312e81" />
+  <link rel="canonical" href="https://grouptabs.vercel.app/" />
+  <meta property="og:title" content="GrpTabs: tabs for every window on Windows" />
+  <meta property="og:description" content="Drag one window onto another. Now they share a tab bar. Free, by Erick Omari." />
+  <meta property="og:image" content="https://grouptabs.vercel.app/assets/og.png" />
+  <meta property="og:url" content="https://grouptabs.vercel.app/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/assets/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="top">
+    <a class="brand" href="/" aria-label="GrpTabs home"><img src="/assets/icon-512.png" alt="" width="34" height="34" /><span>GrpTabs</span></a>
+    <nav aria-label="Page">
+      <a href="#how">How it works</a>
+      <a href="#more">What else</a>
+      <a href="#erick">About</a>
+      <a href="#faq">Questions</a>
+    </nav>
+    <a class="btn small js-download" href="https://github.com/pitchiluxe/GrpTabs/releases/latest/download/GrpTabs-win-Setup.exe">Download</a>
+  </header>
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Drag one window onto another. Now they share a tab bar.</h1>
+        <p class="lede">GrpTabs puts a small tab above every window on your PC. Drop one tab onto another window and the two become one, with tabs like a browser. It works with any app: Explorer, Notepad, PowerShell, Word, the lot.</p>
+        <div class="cta">
+          <a class="btn js-download" href="https://github.com/pitchiluxe/GrpTabs/releases/latest/download/GrpTabs-win-Setup.exe">Download for Windows</a>
+          <p class="fine"><span class="js-version">Free for Windows 10 and 11.</span> About 10 MB, no admin rights needed, and it updates itself.</p>
+        </div>
+      </div>
+
+      <figure class="stage" aria-label="Animated demo of GrpTabs">
+        <div class="desk" id="desk" aria-hidden="true">
+          <div class="win w-term" data-win="term">
+            <div class="bar"><span class="dot"></span>Windows PowerShell</div>
+            <div class="body term-body">
+              <p>PS C:\Users\erick&gt; Get-Service wuauserv</p>
+              <p>Status   Name      DisplayName</p>
+              <p>Running  wuauserv  Windows Update</p>
+              <p>PS C:\Users\erick&gt; <span class="caret"></span></p>
+            </div>
+          </div>
+          <div class="win w-note" data-win="note">
+            <div class="bar"><span class="dot"></span>groceries.txt - Notepad</div>
+            <div class="body note-body">
+              <p>milk</p><p>coffee, the good one</p><p>bread</p><p>call mum back about Sunday</p>
+            </div>
+          </div>
+          <div class="tabs" data-tabs="note"><span class="tab on"><i class="ico ico-note"></i>groceries.txt - Notepad</span></div>
+          <div class="tabs" data-tabs="term"><span class="tab on"><i class="ico ico-term"></i>Windows PowerShell</span></div>
+          <div class="ghost"><i class="ico ico-note"></i>groceries.txt - Notepad</div>
+          <div class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>PageDown</kbd></div>
+          <svg class="cursor" viewBox="0 0 24 24" width="26" height="26"><path d="M4 2l16 10-7 1.6L9.5 21z" fill="#fff" stroke="#1b1840" stroke-width="1.6" stroke-linejoin="round"/></svg>
+        </div>
+        <figcaption>
+          <p class="caption" aria-live="polite">Point at a window and its tab appears.</p>
+          <button class="replay" type="button" aria-pressed="false">Pause demo</button>
+        </figcaption>
+      </figure>
+    </section>
+
+    <section class="how" id="how" aria-labelledby="how-title">
+      <h2 id="how-title">Three moves, nothing to learn</h2>
+      <ol class="moves">
+        <li><h3>Drag to group</h3><p>Grab a window's tab and drop it on another window's tab or title bar. Both windows now share one frame and one tab bar.</p></li>
+        <li><h3>Click to switch</h3><p>Each window keeps its own tab. Click one and that window comes to the front, in exactly the same place and size.</p></li>
+        <li><h3>Drag out to split</h3><p>Pull a tab away and drop it on the desktop. That window steps out of the group and lands where you let go.</p></li>
+      </ol>
+    </section>
+
+    <section class="more" id="more" aria-labelledby="more-title">
+      <h2 id="more-title">The rest of it</h2>
+      <dl class="facts">
+        <div><dt>Keyboard first</dt><dd>Ctrl+Alt+PageDown and PageUp move between tabs, Ctrl+Alt+D pulls a window out, Ctrl+Alt+G pauses everything. Change any of them.</dd></div>
+        <div><dt>Leave some apps alone</dt><dd>Put a program on the exceptions list and its windows never get tabs. Task Manager is there to start with.</dd></div>
+        <div><dt>Group by itself</dt><dd>Tick a program and its new windows join an open window of the same program, so every Explorer window lands in one stack.</dd></div>
+        <div><dt>Tabs only when you want them</dt><dd>Show tabs all the time, only when the pointer is over a window, or never. Pick the width, the see-through amount, and light or dark.</dd></div>
+        <div><dt>Never loses a window</dt><dd>Windows waiting behind a tab are written down before they are hidden. Quit, update or even crash, and they all come back.</dd></div>
+        <div><dt>Keeps itself current</dt><dd>GrpTabs checks for new versions, downloads them quietly and tells you when one is ready. A restart installs it.</dd></div>
+      </dl>
+    </section>
+
+    <section class="peek" aria-labelledby="peek-title">
+      <div class="peek-copy">
+        <h2 id="peek-title">Settings you can actually read</h2>
+        <p>One window, six pages, plain switches. Open it from the notification area or the Start menu. Nothing changes until you press Apply or OK.</p>
+      </div>
+      <div class="app-shot" role="img" aria-label="The GrpTabs settings window, General page">
+        <div class="shot-head"><img src="/assets/icon-512.png" alt="" width="40" height="40" /><span class="shot-name">Grp<b>Tabs</b></span><span class="shot-ver js-shot-ver">v1.0.0</span></div>
+        <div class="shot-main">
+          <div class="shot-nav"><span class="on">General</span><span>Appearance</span><span>Behavior</span><span>Exceptions</span><span>Groups</span><span>Hotkeys</span></div>
+          <div class="shot-page">
+            <div class="shot-card"><strong>Settings</strong><label><i class="tick"></i>Start with Windows</label><label><i class="tick"></i>Show an icon in the notification area</label></div>
+            <div class="shot-card"><strong>Updates</strong><label><i class="tick"></i>Automatically check for updates</label><span class="shot-note">GrpTabs is up to date.</span></div>
+            <div class="shot-card"><strong>Status</strong><span class="shot-note">GrpTabs is running. 2 groups open.</span></div>
+          </div>
+        </div>
+        <div class="shot-foot"><span>Created by Erick Omari</span><span class="shot-btns"><i class="b on">OK</i><i class="b">Cancel</i><i class="b">Apply</i></span></div>
+      </div>
+    </section>
+
+    <section class="erick" id="erick" aria-labelledby="erick-title">
+      <img class="portrait" src="/assets/erick.jpg" alt="Erick Omari" width="280" height="280" loading="lazy" />
+      <div class="note">
+        <h2 id="erick-title">Why I made it</h2>
+        <p>I'm Erick Omari. Most days I have a ticket open in the browser, two PowerShell windows, Explorer, Notepad and whatever I'm writing, all fighting for the taskbar. I wanted them grouped the way browser tabs are, by the task I'm doing rather than by the app they belong to.</p>
+        <p>So I built GrpTabs. It's small, it's free, and it stays out of the way until you drag something. If it saves you a few alt-tabs a day, it has done its job. Tell me what you'd change.</p>
+        <p class="sign">Erick Omari, software architect and IAM engineer</p>
+        <ul class="links">
+          <li><a href="https://github.com/pitchiluxe/GrpTabs">Source and releases on GitHub</a></li>
+          <li><a href="https://www.linkedin.com/in/erickomari/">LinkedIn</a></li>
+          <li><a href="https://erickomari.vercel.app/">More of my projects</a></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="faq" id="faq" aria-labelledby="faq-title">
+      <h2 id="faq-title">Questions people ask</h2>
+      <details><summary>Windows says it protected my PC. Is GrpTabs safe?</summary><p>The installer isn't code-signed yet, so SmartScreen doesn't recognise it. Choose More info, then Run anyway. The full source is on GitHub if you want to read or build it yourself.</p></details>
+      <details><summary>Do I need administrator rights?</summary><p>No. GrpTabs installs for your account only. Because of that, Windows won't let it move windows of apps you started as administrator, so those simply don't get tabs.</p></details>
+      <details><summary>I already use TidyTabs. Can both run?</summary><p>They can, but both draw tabs in the same spot above each window, so they get in each other's way. GrpTabs tells you when it sees TidyTabs running. Pause or quit one of them.</p></details>
+      <details><summary>What happens to hidden windows if I quit?</summary><p>Every window that was waiting behind a tab is shown again, where the group was. If GrpTabs stops unexpectedly, it puts them back the next time it starts.</p></details>
+      <details><summary>How do updates work?</summary><p>GrpTabs checks GitHub when it starts and every six hours. When a new version is downloaded you get a notification; choose Restart to update, or it installs the next time GrpTabs closes. You can turn this off in Settings, General.</p></details>
+      <details><summary>How do I uninstall it?</summary><p>Settings, Apps, Installed apps, GrpTabs, Uninstall. It removes itself from startup and leaves your windows as they were.</p></details>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>GrpTabs is free software created by Erick Omari. Made in 2026.</p>
+    <p><a href="https://github.com/pitchiluxe/GrpTabs">GitHub</a> <a href="https://github.com/pitchiluxe/GrpTabs/releases">Release notes</a></p>
+  </footer>
+
+  <script src="/main.js" defer></script>
+</body>
+</html>
