@@ -15,6 +15,8 @@ internal sealed class Engine : IDisposable
     private readonly GroupModel groups = new();
     private readonly Dictionary<IntPtr, TabStrip> strips = new();
     private readonly HashSet<IntPtr> hiddenByUs = new();
+    /// <summary>Windows we just showed: DWM keeps them cloaked during the show animation, which is not a reason to drop their tabs.</summary>
+    private readonly Dictionary<IntPtr, long> shownAt = new();
     private readonly Dictionary<IntPtr, (Native.WINDOWPLACEMENT Place, Native.RECT Frame)> lastPlace = new();
     private readonly Dictionary<IntPtr, Image?> icons = new();
     private readonly List<IntPtr> hooks = new();
@@ -38,7 +40,7 @@ internal sealed class Engine : IDisposable
     {
         Settings = settings;
         proc = OnWinEvent;
-        hotkeys = new HotkeyWindow(OnHotkey);
+        hotkeys = new HotkeyWindow(OnHotkey, OnNumberHotkey);
         hoverTimer.Tick += (_, _) => HoverTick();
     }
 
@@ -70,7 +72,7 @@ internal sealed class Engine : IDisposable
         Settings = st;
         hotkeys.Register(st, Paused);
         foreach (var w in WindowInfo.TopLevel()) Refresh(w);
-        foreach (var s in strips.Values) { s.Reposition(); s.Invalidate(); }
+        foreach (var s in strips.Values) s.Reposition();
         Changed?.Invoke();
     }
 
@@ -96,8 +98,9 @@ internal sealed class Engine : IDisposable
                 if (strips.TryGetValue(hwnd, out var s2)) { Remember(hwnd); s2.Reposition(); }
                 break;
             case Native.EVENT_SYSTEM_FOREGROUND:
-                foreach (var st in strips.Values) st.Invalidate();
                 Refresh(hwnd);
+                // Any window coming forward changes the stacking: every strip re-seats itself above its window.
+                foreach (var s5 in strips.Values) s5.KeepAbove();
                 break;
             case Native.EVENT_OBJECT_SHOW:
             case Native.EVENT_OBJECT_UNCLOAKED:
@@ -119,6 +122,7 @@ internal sealed class Engine : IDisposable
             case Native.EVENT_OBJECT_HIDE:
             case Native.EVENT_OBJECT_CLOAKED:
                 if (selfChange || hiddenByUs.Contains(hwnd)) break;
+                if (ev == Native.EVENT_OBJECT_CLOAKED && JustShown(hwnd)) { RefreshSoon(hwnd); break; }
                 if (groups.GroupOf(hwnd) is { } grp && grp.Active == hwnd && !Native.IsWindowVisible(hwnd) && Native.IsWindow(hwnd))
                 {
                     // The app hid its own window (minimize to tray): the group's next tab takes its place.
@@ -170,10 +174,11 @@ internal sealed class Engine : IDisposable
     /// <summary>Create, update or remove the strip of a shown window according to the settings.</summary>
     public void Refresh(IntPtr hwnd)
     {
-        if (!Native.IsWindow(hwnd) || hiddenByUs.Contains(hwnd)) { DropStrip(hwnd); return; }
-        if (!WindowInfo.Eligible(hwnd)) { DropStrip(hwnd); return; }
+        if (!Native.IsWindow(hwnd) || hiddenByUs.Contains(hwnd)) { if (strips.ContainsKey(hwnd)) Log.Write($"drop {hwnd}: gone or hidden by us"); DropStrip(hwnd); return; }
+        if (Native.IsWindowVisible(hwnd) && Native.IsCloaked(hwnd) && strips.ContainsKey(hwnd) && JustShown(hwnd)) { RefreshSoon(hwnd); return; }
+        if (!WindowInfo.Eligible(hwnd)) { if (strips.ContainsKey(hwnd)) Log.Write($"drop {hwnd}: not eligible visible={Native.IsWindowVisible(hwnd)} cloaked={Native.IsCloaked(hwnd)} iconic={Native.IsIconic(hwnd)}"); DropStrip(hwnd); return; }
         var mode = Paused ? StripMode.None : Rules.Mode(Settings, groups, WindowInfo.Facts(hwnd));
-        if (mode == StripMode.None) { DropStrip(hwnd); return; }
+        if (mode == StripMode.None) { if (strips.ContainsKey(hwnd)) Log.Write($"drop {hwnd}: mode none"); DropStrip(hwnd); return; }
         if (!strips.TryGetValue(hwnd, out var strip))
         {
             strip = new TabStrip(this, hwnd);
@@ -186,6 +191,37 @@ internal sealed class Engine : IDisposable
         Log.Write($"refresh {hwnd} mode={mode} show={show} visible={strip.Visible} bounds={strip.Bounds}");
         if (show && !strip.Visible && !Native.IsIconic(hwnd)) strip.Show();
         else if (!show && strip.Visible) strip.Hide();
+    }
+
+    /// <summary>
+    /// The group's frame now belongs to another window: the same strip follows it,
+    /// so the tabs never disappear and reappear while you switch.
+    /// </summary>
+    private void MoveStrip(IntPtr from, IntPtr to)
+    {
+        if (from == to || !strips.Remove(from, out var s)) return;
+        if (strips.Remove(to, out var old)) { old.Close(); old.Dispose(); }
+        s.Retarget(to);
+        strips[to] = s;
+        s.SetTabs(groups.TabsFor(to));
+        if (Native.IsWindowVisible(to)) s.Reposition();
+    }
+
+    /// <summary>Refresh again shortly: a window that was just shown can report itself not ready for a moment.</summary>
+    private void RefreshSoon(IntPtr hwnd)
+    {
+        var t = new System.Windows.Forms.Timer { Interval = 150 };
+        t.Tick += (_, _) => { t.Stop(); t.Dispose(); Refresh(hwnd); };
+        t.Start();
+    }
+
+    /// <summary>True for a short while after GrpTabs showed the window, while DWM still cloaks it for the show animation.</summary>
+    private bool JustShown(IntPtr hwnd)
+    {
+        if (!shownAt.TryGetValue(hwnd, out var at)) return false;
+        if (Environment.TickCount64 - at < 800) return true;
+        shownAt.Remove(hwnd);
+        return false;
     }
 
     private void DropStrip(IntPtr hwnd)
@@ -205,6 +241,8 @@ internal sealed class Engine : IDisposable
     /// <summary>Hover mode: show a window's tabs while the pointer is over it.</summary>
     private void HoverTick()
     {
+        // Backstop for stacking changes that send no event (another app reordering its own windows).
+        foreach (var s in strips.Values) s.KeepAbove();
         if (Paused || dragging != IntPtr.Zero) return;
         Native.GetCursorPos(out var p);
         var root = Native.GetAncestor(Native.WindowFromPoint(p), Native.GA_ROOT);
@@ -238,6 +276,7 @@ internal sealed class Engine : IDisposable
     /// <summary>Show <paramref name="to"/> exactly where <paramref name="from"/> is (its visible frame, maximized or not).</summary>
     private void ShowInPlaceOf(IntPtr from, IntPtr to)
     {
+        shownAt[to] = Environment.TickCount64;
         if (!lastPlace.TryGetValue(from, out var src) || Native.IsWindow(from)) { Remember(from); src = lastPlace.GetValueOrDefault(from); }
         if (src.Place.length == 0) { Show(to); return; }
         var wp = src.Place;
@@ -290,7 +329,9 @@ internal sealed class Engine : IDisposable
         if (rest.Count == 0) return;
         var next = groups.GroupOf(rest[0])?.Active ?? rest[0];
         ShowInPlaceOf(leaving, next);
+        MoveStrip(leaving, next);
         Refresh(next);
+        RefreshSoon(next);
         SaveHidden();
         Changed?.Invoke();
     }
@@ -303,12 +344,19 @@ internal sealed class Engine : IDisposable
         var prev = g.Active;
         if (prev != hwnd)
         {
-            groups.Activate(hwnd);
-            ShowInPlaceOf(prev, hwnd);
-            HideMember(prev);
+            var f = Native.Frame(prev);
+            bool visible = Native.IsWindowVisible(prev) && !Native.IsIconic(prev);
+            Crossfade.Run(new Rectangle(f.Left, f.Top, f.Width, f.Height), Settings.SmoothSwitch && visible, () =>
+            {
+                groups.Activate(hwnd);
+                ShowInPlaceOf(prev, hwnd);
+                MoveStrip(prev, hwnd);
+                HideMember(prev);
+            });
         }
         Native.Activate(hwnd);
         Refresh(hwnd);
+        RefreshSoon(hwnd);
         SaveHidden();
         Changed?.Invoke();
     }
@@ -326,9 +374,12 @@ internal sealed class Engine : IDisposable
         if (sameGroup) { ActivateTab(w); return true; }
         if (wasActive) HandOff(w, before);
         ShowInPlaceOf(frameOwner, w);
+        // The dragged window keeps its own strip (it is handling this drop); otherwise the target's strip moves over.
+        if (!strips.ContainsKey(w)) MoveStrip(frameOwner, w);
         foreach (var m in groups.TabsFor(w)) if (m != w && Native.IsWindowVisible(m)) HideMember(m);
         Native.Activate(w);
         Refresh(w);
+        RefreshSoon(w);
         SaveHidden();
         Changed?.Invoke();
         return true;
@@ -373,7 +424,7 @@ internal sealed class Engine : IDisposable
     public void BeginDrag(IntPtr tab, TabStrip from)
     {
         dragging = tab;
-        ghost = new DragGhost(Native.Title(tab), IconOf(tab), from.UiScale);
+        ghost = new DragGhost(Native.Title(tab), IconOf(tab), from.UiScale, Palette.For(Settings).On);
         ghost.MoveTo(Cursor.Position);
         ghost.Show();
     }
@@ -429,13 +480,49 @@ internal sealed class Engine : IDisposable
         }
     }
 
+    /// <summary>Ask a window to close, as its own X button does (it may ask to save).</summary>
+    public void CloseTab(IntPtr hwnd) => Native.PostMessage(hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+
+    /// <summary>Switch the group shown in <paramref name="target"/>'s frame one tab along (mouse wheel).</summary>
+    public void CycleGroup(IntPtr target, int dir)
+    {
+        if (groups.Cycle(target, dir) is { } next) ActivateTab(next);
+    }
+
+    /// <summary>Move a tab one place left or right in its group.</summary>
+    private void MoveTab(IntPtr tab, int dir)
+    {
+        var g = groups.GroupOf(tab);
+        if (g is null) return;
+        int i = g.Members.IndexOf(tab), j = i + dir;
+        if (j < 0 || j >= g.Members.Count) return;
+        (g.Members[i], g.Members[j]) = (g.Members[j], g.Members[i]);
+        Refresh(g.Active);
+    }
+
+    /// <summary>Pull every other open window of the same program into this window's group.</summary>
+    private void GroupAllOfApp(IntPtr target)
+    {
+        var exe = WindowInfo.Exe(target);
+        if (exe.Length == 0) return;
+        foreach (var w in WindowInfo.TopLevel())
+            if (w != target && !groups.TabsFor(target).Contains(w) && string.Equals(WindowInfo.Exe(w), exe, StringComparison.OrdinalIgnoreCase))
+                GroupInto(w, groups.GroupOf(target)?.Active ?? target);
+    }
+
     public void ShowTabMenu(TabStrip strip, IntPtr tab, Point screen)
     {
         var members = groups.TabsFor(strip.Target);
+        int index = members.ToList().IndexOf(tab);
+        string app = Path.GetFileNameWithoutExtension(WindowInfo.Exe(tab));
         var menu = new ContextMenuStrip();
-        menu.Items.Add("Close tab", null, (_, _) => Native.PostMessage(tab, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero));
-        var others = menu.Items.Add("Close other tabs", null, (_, _) => { foreach (var m in members.ToList()) if (m != tab) Native.PostMessage(m, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero); });
-        others.Enabled = members.Count > 1;
+        menu.Items.Add("Close tab", null, (_, _) => CloseTab(tab));
+        menu.Items.Add("Close other tabs", null, (_, _) => { foreach (var m in members.ToList()) if (m != tab) CloseTab(m); }).Enabled = members.Count > 1;
+        menu.Items.Add("Close group", null, (_, _) => { foreach (var m in members.ToList()) CloseTab(m); }).Enabled = members.Count > 1;
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Move tab left", null, (_, _) => MoveTab(tab, -1)).Enabled = index > 0;
+        menu.Items.Add("Move tab right", null, (_, _) => MoveTab(tab, 1)).Enabled = index >= 0 && index < members.Count - 1;
+        menu.Items.Add(app.Length > 0 ? $"Group all {app} windows here" : "Group all windows of this app here", null, (_, _) => GroupAllOfApp(strip.Target));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Take out of group", null, (_, _) => Detach(tab)).Enabled = members.Count > 1;
         menu.Items.Add("Ungroup all tabs here", null, (_, _) => { foreach (var m in members.Skip(1).ToList()) Detach(m); }).Enabled = members.Count > 1;
@@ -456,6 +543,14 @@ internal sealed class Engine : IDisposable
         var fg = Native.GetForegroundWindow();
         if (act == HotkeyAction.Detach) { if (groups.GroupOf(fg) is not null) Detach(fg); return; }
         if (groups.Cycle(fg, act == HotkeyAction.Next ? 1 : -1) is { } next) ActivateTab(next);
+    }
+
+    /// <summary>Ctrl+Alt+1 to 9: the tab with that number in the active window's group.</summary>
+    private void OnNumberHotkey(int n)
+    {
+        if (Paused) return;
+        var g = groups.GroupOf(Native.GetForegroundWindow());
+        if (g is not null && n >= 1 && n <= g.Members.Count) ActivateTab(g.Members[n - 1]);
     }
 
     public void SetPaused(bool paused)
@@ -525,12 +620,14 @@ internal sealed class Engine : IDisposable
 internal sealed class HotkeyWindow : NativeWindow, IDisposable
 {
     private readonly Action<HotkeyAction> onHotkey;
+    private readonly Action<int> onNumber;
     private readonly List<int> ids = new();
     public List<string> Failures { get; } = new();
 
-    public HotkeyWindow(Action<HotkeyAction> onHotkey)
+    public HotkeyWindow(Action<HotkeyAction> onHotkey, Action<int> onNumber)
     {
         this.onHotkey = onHotkey;
+        this.onNumber = onNumber;
         CreateHandle(new CreateParams { Caption = "GrpTabs hotkeys" });
     }
 
@@ -548,11 +645,21 @@ internal sealed class HotkeyWindow : NativeWindow, IDisposable
             if (Native.RegisterHotKey(Handle, id, hk.Modifiers, (uint)hk.Key)) ids.Add(id);
             else Failures.Add($"{hk} ({Hotkey.Labels[act]})");
         }
+        if (paused || !st.NumberHotkeys) return;
+        int taken = 0;
+        for (int n = 1; n <= 9; n++)
+        {
+            int id = 0xB100 + n;
+            if (Native.RegisterHotKey(Handle, id, Native.MOD_CONTROL | Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)(Keys.D0 + n))) ids.Add(id);
+            else taken++;
+        }
+        if (taken > 0) Failures.Add($"Ctrl+Alt+number for {taken} of the 9 tabs");
     }
 
     protected override void WndProc(ref Message m)
     {
         if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() is int id and >= 0xB000 and < 0xB010) onHotkey((HotkeyAction)(id - 0xB000));
+        else if (m.Msg == Native.WM_HOTKEY && m.WParam.ToInt32() is int nid and > 0xB100 and <= 0xB109) onNumber(nid - 0xB100);
         base.WndProc(ref m);
     }
 

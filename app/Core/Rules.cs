@@ -1,7 +1,7 @@
 namespace GrpTabs.Core;
 
 /// <summary>Facts about a window that the rules need (kept apart from Win32 so they can be tested).</summary>
-public readonly record struct WinFacts(IntPtr Hwnd, string Exe, bool Maximized, bool Minimized);
+public readonly record struct WinFacts(IntPtr Hwnd, string Exe, bool Maximized, bool Minimized, bool FullScreen = false);
 
 public enum StripMode { Show, Hover, None }
 
@@ -12,6 +12,7 @@ public static class Rules
     {
         if (w.Minimized || st.IsException(w.Exe)) return StripMode.None;
         if (w.Maximized && st.HideWhenMaximized) return StripMode.None;
+        if (w.FullScreen && st.HideInFullScreen) return StripMode.None;
         var when = groups.GroupOf(w.Hwnd) is not null ? st.GroupedTabs : st.SingleTabs;
         return when switch { TabsWhen.Always => StripMode.Show, TabsWhen.Hover => StripMode.Hover, _ => StripMode.None };
     }

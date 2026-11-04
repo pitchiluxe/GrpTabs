@@ -10,7 +10,8 @@ internal static class Native
     public const long WS_CAPTION = 0x00C00000L, WS_CHILD = 0x40000000L, WS_DISABLED = 0x08000000L;
     public const long WS_EX_TOOLWINDOW = 0x00000080L, WS_EX_NOACTIVATE = 0x08000000L, WS_EX_APPWINDOW = 0x00040000L;
     public const int SW_HIDE = 0, SW_SHOWNORMAL = 1, SW_SHOWMAXIMIZED = 3, SW_SHOW = 5, SW_RESTORE = 9, SW_SHOWNA = 8;
-    public const uint GW_OWNER = 4, GA_ROOT = 2;
+    public const uint GW_OWNER = 4, GW_HWNDPREV = 3, GA_ROOT = 2;
+    public const long WS_EX_TOPMOST = 0x00000008L;
     public const uint WM_CLOSE = 0x0010, WM_GETICON = 0x007F, WM_SYSCOMMAND = 0x0112, WM_HOTKEY = 0x0312;
     public const int ICON_SMALL = 0, ICON_BIG = 1, ICON_SMALL2 = 2, GCLP_HICONSM = -34, GCLP_HICON = -14;
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;

@@ -70,7 +70,16 @@ internal static class WindowInfo
         return Native.IsIconic(hwnd) || (r.Width >= 220 && r.Height >= 120);
     }
 
-    public static WinFacts Facts(IntPtr hwnd) => new(hwnd, Exe(hwnd), Native.IsZoomed(hwnd), Native.IsIconic(hwnd));
+    public static WinFacts Facts(IntPtr hwnd) => new(hwnd, Exe(hwnd), Native.IsZoomed(hwnd), Native.IsIconic(hwnd), FullScreen(hwnd));
+
+    /// <summary>Covers its whole monitor, taskbar included (games, videos, presentations), and is not just maximized.</summary>
+    public static bool FullScreen(IntPtr hwnd)
+    {
+        if (Native.IsIconic(hwnd)) return false;
+        var f = Native.Frame(hwnd);
+        var m = Screen.FromHandle(hwnd).Bounds;
+        return f.Left <= m.Left && f.Top <= m.Top && f.Right >= m.Right && f.Bottom >= m.Bottom;
+    }
 
     public static List<IntPtr> TopLevel()
     {

@@ -24,6 +24,18 @@ public sealed class Settings
     public bool MiddleClickCloses { get; set; } = true;
     public bool DoubleClickMaximizes { get; set; } = true;
     public bool DragOutDetaches { get; set; } = true;
+    /// <summary>Tab colour: "" for GrpTabs indigo, "accent" for the Windows accent colour, or "#RRGGBB".</summary>
+    public string TabColor { get; set; } = "";
+    /// <summary>A close button on each tab (shown on the active tab and the one under the pointer).</summary>
+    public bool CloseButtons { get; set; } = true;
+    /// <summary>Scrolling the mouse wheel over the tabs switches between them.</summary>
+    public bool WheelSwitches { get; set; } = true;
+    /// <summary>Ctrl+Alt+1 to 9 jump to that tab of the active group.</summary>
+    public bool NumberHotkeys { get; set; } = true;
+    /// <summary>No tabs over full-screen windows (games, videos, presentations).</summary>
+    public bool HideInFullScreen { get; set; } = true;
+    /// <summary>Cross-fade between windows when you switch tabs.</summary>
+    public bool SmoothSwitch { get; set; } = true;
     /// <summary>Program file names (e.g. "Taskmgr.exe") whose windows never get tabs.</summary>
     public List<string> Exceptions { get; set; } = new() { "Taskmgr.exe", "SnippingTool.exe", "ScreenClippingHost.exe" };
     /// <summary>Program file names whose new windows join an open window of the same program.</summary>
@@ -48,6 +60,7 @@ public sealed class Settings
     {
         IdleOpacity = Math.Clamp(IdleOpacity, 30, 100);
         TabWidth = Math.Clamp(TabWidth, 90, 260);
+        TabColor = TabColors.Normalize(TabColor);
         Exceptions = Clean(Exceptions);
         AutoGroup = Clean(AutoGroup);
         var defaults = DefaultHotkeys();

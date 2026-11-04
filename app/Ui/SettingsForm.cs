@@ -58,6 +58,17 @@ internal sealed class SettingsForm : Form
         updater.StateChanged += OnEngineChanged;
     }
 
+    /// <summary>WS_EX_COMPOSITED: Windows paints the window and all its controls off-screen in one pass, so hovering never flickers.</summary>
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= 0x02000000;
+            return cp;
+        }
+    }
+
     private static bool SafeStartup() { try { return Settings.StartsWithWindows; } catch (Exception) { return false; } }
 
     private void OnEngineChanged()
@@ -237,6 +248,23 @@ internal sealed class SettingsForm : Form
         c.Add(Slider("Opacity when the pointer is elsewhere", pending.IdleOpacity, 30, 100, "%", v => { pending.IdleOpacity = v; preview?.Invalidate(); }));
         c.Add(Slider("Maximum tab width", pending.TabWidth, 90, 260, " px", v => { pending.TabWidth = v; preview?.Invalidate(); }));
         c.Add(Check("Show app icons on tabs", pending.ShowIcons, v => { pending.ShowIcons = v; preview?.Invalidate(); Changed(); }));
+        c.Add(Check("Fade smoothly between windows when switching tabs", pending.SmoothSwitch, v => { pending.SmoothSwitch = v; Changed(); },
+            Crossfade.WindowsAnimates() ? null : "Windows animation effects are off, so GrpTabs switches instantly."));
+        var colour = Card("Tab colour");
+        colour.Add(Note("The active tab takes this colour; the others are a lighter or darker tint of it, with text that stays readable."));
+        var swatches = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(CardWidth - 40, 0), BackColor = Color.Transparent, Margin = new Padding(0, 2, 0, 6) };
+        foreach (var (name, hex) in TabColors.Presets)
+            swatches.Controls.Add(Swatch(name, TabColors.Parse(hex)!.Value, pending.TabColor == hex || (pending.TabColor == "" && hex == "#4F46E5"), () => SetColour(hex == "#4F46E5" ? "" : hex)));
+        var accent = Palette.WindowsAccent();
+        swatches.Controls.Add(Swatch(accent is null ? "Windows accent colour (not found)" : "Windows accent colour", accent ?? Color.Gray, pending.TabColor == "accent", () => SetColour("accent"), ring: true));
+        colour.Add(swatches);
+        var custom = Btn(TabColors.Parse(pending.TabColor) is { } cur && !TabColors.Presets.Any(p => p.Hex == pending.TabColor) ? $"Custom colour {pending.TabColor}..." : "Custom colour...");
+        custom.Click += (_, _) =>
+        {
+            using var dlg = new ColorDialog { FullOpen = true, AnyColor = true, Color = Palette.BaseColor(pending.TabColor) };
+            if (dlg.ShowDialog(this) == DialogResult.OK) SetColour(TabColors.Hex(dlg.Color));
+        };
+        colour.Add(custom);
         var t = Card("Theme");
         t.Add(Radios("theme", pending.Theme, new[] { (GrpTheme.Auto, "Follow Windows (light or dark mode)"), (GrpTheme.Light, "Light"), (GrpTheme.Dark, "Dark") }, v => { pending.Theme = v; preview?.Invalidate(); }));
         var p = Card("Preview");
@@ -245,6 +273,20 @@ internal sealed class SettingsForm : Form
     }
 
     private PreviewPanel? preview;
+
+    private void SetColour(string value)
+    {
+        pending.TabColor = TabColors.Normalize(value);
+        Draw();
+    }
+
+    private static Control Swatch(string name, Color color, bool selected, Action pick, bool ring = false)
+    {
+        var b = new SwatchButton(color, selected, ring) { Size = new Size(36, 36), Margin = new Padding(0, 0, 8, 8), AccessibleName = name };
+        new ToolTip().SetToolTip(b, name);
+        b.Click += (_, _) => pick();
+        return b;
+    }
 
     private void Behavior()
     {
@@ -258,6 +300,9 @@ internal sealed class SettingsForm : Form
         c.Add(Check("Middle-click a tab to close its window", pending.MiddleClickCloses, v => { pending.MiddleClickCloses = v; Changed(); }));
         c.Add(Check("Double-click a tab to maximize or restore", pending.DoubleClickMaximizes, v => { pending.DoubleClickMaximizes = v; Changed(); }));
         c.Add(Check("Drag a tab out of its group onto the desktop to take it out", pending.DragOutDetaches, v => { pending.DragOutDetaches = v; Changed(); }));
+        c.Add(Check("Show a close button on tabs", pending.CloseButtons, v => { pending.CloseButtons = v; Changed(); }, "On the active tab and the one under the pointer."));
+        c.Add(Check("Scroll the mouse wheel over the tabs to switch", pending.WheelSwitches, v => { pending.WheelSwitches = v; Changed(); }));
+        c.Add(Check("Hide tabs over full-screen windows", pending.HideInFullScreen, v => { pending.HideInFullScreen = v; Changed(); }, "Games, videos and presentations that cover the whole screen."));
     }
 
     /// <summary>Programs with a window open now, plus any already in the list.</summary>
@@ -332,6 +377,7 @@ internal sealed class SettingsForm : Form
     {
         var c = Card("Hotkeys");
         c.Add(Note("Click a box and press the keys, with Ctrl or Alt. Backspace clears it (no hotkey)."));
+        c.Add(Check("Ctrl+Alt+1 to 9 jump to that tab of the active group", pending.NumberHotkeys, v => { pending.NumberHotkeys = v; Changed(); }));
         var clashes = Hotkey.Clashes(pending.Hotkeys);
         foreach (var act in Enum.GetValues<HotkeyAction>())
         {
@@ -459,7 +505,7 @@ internal sealed class PreviewPanel : Panel
     protected override void OnPaint(PaintEventArgs e)
     {
         var s = st();
-        var pal = Palette.For(s.Theme);
+        var pal = Palette.For(s);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using (var hatch = new HatchBrush(HatchStyle.WideUpwardDiagonal, Color.FromArgb(230, 233, 242), Color.FromArgb(240, 242, 248))) g.FillRectangle(hatch, ClientRectangle);
@@ -480,10 +526,58 @@ internal sealed class PreviewPanel : Panel
             path.AddLine(r.Right, r.Bottom, r.X, r.Bottom);
             path.CloseFigure();
             using (var b = new SolidBrush(Color.FromArgb(alpha, on ? pal.On : pal.Tab))) g.FillPath(b, path);
+            using (var edge = new Pen(Color.FromArgb(alpha, on ? pal.On : pal.Line))) g.DrawPath(edge, path);
             int tx = r.X + 10;
-            if (s.ShowIcons) { using var ib = new SolidBrush(Color.FromArgb(alpha, on ? Color.White : Palette.Indigo)); g.FillRectangle(ib, tx, r.Y + r.Height / 2 - 7, 14, 14); tx += 20; }
-            TextRenderer.DrawText(g, titles[i], font, new Rectangle(tx, r.Y, r.Right - tx - 4, r.Height), Color.FromArgb(alpha, on ? pal.OnInk : pal.TabInk), TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            if (s.ShowIcons) { using var ib = new SolidBrush(on ? pal.OnInk : pal.On); g.FillRectangle(ib, tx, r.Y + r.Height / 2 - 7, 14, 14); tx += 20; }
+            int right = r.Right - 4 - (s.CloseButtons && on ? 20 : 0);
+            TextRenderer.DrawText(g, titles[i], font, new Rectangle(tx, r.Y, right - tx, r.Height), on ? pal.OnInk : pal.TabInk, on ? pal.On : pal.Tab, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            if (s.CloseButtons && on)
+            {
+                using var pen = new Pen(pal.OnInk, 1.4f);
+                int cx = r.Right - 16, cy = r.Y + r.Height / 2;
+                g.DrawLine(pen, cx - 4, cy - 4, cx + 4, cy + 4);
+                g.DrawLine(pen, cx + 4, cy - 4, cx - 4, cy + 4);
+            }
             x += w + 3;
         }
+    }
+}
+
+/// <summary>A round colour swatch: a ring marks the chosen one; the Windows accent swatch has a white inner ring.</summary>
+internal sealed class SwatchButton : Button
+{
+    private readonly Color color;
+    private readonly bool selected, accent;
+
+    public SwatchButton(Color color, bool selected, bool accent)
+    {
+        this.color = color;
+        this.selected = selected;
+        this.accent = accent;
+        FlatStyle = FlatStyle.Flat;
+        FlatAppearance.BorderSize = 0;
+        FlatAppearance.MouseOverBackColor = Color.White;
+        FlatAppearance.MouseDownBackColor = Color.White;
+        BackColor = Color.White;
+        Cursor = Cursors.Hand;
+        Text = "";
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(Parent?.BackColor ?? Color.White);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        var r = new Rectangle(4, 4, Width - 9, Height - 9);
+        if (selected) { using var ring = new Pen(color, 2.4f); g.DrawEllipse(ring, 1, 1, Width - 3, Height - 3); }
+        using (var fill = new SolidBrush(color)) g.FillEllipse(fill, r);
+        if (accent) { using var inner = new Pen(Color.White, 2f); g.DrawEllipse(inner, r.X + 5, r.Y + 5, r.Width - 10, r.Height - 10); }
+        if (selected)
+        {
+            using var tick = new Pen(GrpTabs.Core.TabColors.InkOn(color), 2.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
+            int cx = Width / 2, cy = Height / 2;
+            g.DrawLines(tick, new[] { new Point(cx - 5, cy), new Point(cx - 1, cy + 4), new Point(cx + 6, cy - 4) });
+        }
+        if (Focused) ControlPaint.DrawFocusRectangle(g, new Rectangle(0, 0, Width - 1, Height - 1));
     }
 }
