@@ -24,8 +24,10 @@ public sealed class Settings
     public bool MiddleClickCloses { get; set; } = true;
     public bool DoubleClickMaximizes { get; set; } = true;
     public bool DragOutDetaches { get; set; } = true;
-    /// <summary>Tab colour: "" for GrpTabs indigo, "accent" for the Windows accent colour, or "#RRGGBB".</summary>
+    /// <summary>Tab colour: "" for rainbow (every tab its own colour), "accent" for the Windows accent colour, or "#RRGGBB" for every tab.</summary>
     public string TabColor { get; set; } = "";
+    /// <summary>Settings format: files from before 1.2 have none (0).</summary>
+    public int Version { get; set; }
     /// <summary>A close button on each tab (shown on the active tab and the one under the pointer).</summary>
     public bool CloseButtons { get; set; } = true;
     /// <summary>Scrolling the mouse wheel over the tabs switches between them.</summary>
@@ -34,8 +36,6 @@ public sealed class Settings
     public bool NumberHotkeys { get; set; } = true;
     /// <summary>No tabs over full-screen windows (games, videos, presentations).</summary>
     public bool HideInFullScreen { get; set; } = true;
-    /// <summary>Cross-fade between windows when you switch tabs.</summary>
-    public bool SmoothSwitch { get; set; } = true;
     /// <summary>Program file names (e.g. "Taskmgr.exe") whose windows never get tabs.</summary>
     public List<string> Exceptions { get; set; } = new() { "Taskmgr.exe", "SnippingTool.exe", "ScreenClippingHost.exe" };
     /// <summary>Program file names whose new windows join an open window of the same program.</summary>
@@ -61,6 +61,8 @@ public sealed class Settings
         IdleOpacity = Math.Clamp(IdleOpacity, 30, 100);
         TabWidth = Math.Clamp(TabWidth, 90, 260);
         TabColor = TabColors.Normalize(TabColor);
+        // 1.2 made rainbow tabs the default: settings saved by an older version switch to it once.
+        if (Version < 2) { TabColor = ""; Version = 2; }
         Exceptions = Clean(Exceptions);
         AutoGroup = Clean(AutoGroup);
         var defaults = DefaultHotkeys();
@@ -81,7 +83,11 @@ public sealed class Settings
         catch (JsonException) { return new Settings(); }
     }
 
-    public string ToJson() => JsonSerializer.Serialize(this, Json);
+    public string ToJson()
+    {
+        Version = Math.Max(Version, 2); // what this version writes is never migrated again
+        return JsonSerializer.Serialize(this, Json);
+    }
 
     public static Settings Load()
     {

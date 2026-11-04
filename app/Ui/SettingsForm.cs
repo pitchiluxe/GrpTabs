@@ -29,8 +29,8 @@ internal sealed class SettingsForm : Form
         Text = "GrpTabs Settings";
         Icon = AppIcon.Load();
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(780, 620);
-        MinimumSize = new Size(700, 560);
+        ClientSize = new Size(860, 640);
+        MinimumSize = new Size(780, 560);
         Font = new Font("Segoe UI", 9.75f);
         BackColor = Palette.Paper;
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -153,7 +153,8 @@ internal sealed class SettingsForm : Form
         Changed();
     }
 
-    private int CardWidth => Math.Max(420, content.ClientSize.Width - content.Padding.Horizontal - 6);
+    // Leave room for the scroll bar, which appears only once the cards are added.
+    private int CardWidth => Math.Max(420, content.ClientSize.Width - content.Padding.Horizontal - SystemInformation.VerticalScrollBarWidth - 6);
 
     private Card Card(string title)
     {
@@ -248,13 +249,12 @@ internal sealed class SettingsForm : Form
         c.Add(Slider("Opacity when the pointer is elsewhere", pending.IdleOpacity, 30, 100, "%", v => { pending.IdleOpacity = v; preview?.Invalidate(); }));
         c.Add(Slider("Maximum tab width", pending.TabWidth, 90, 260, " px", v => { pending.TabWidth = v; preview?.Invalidate(); }));
         c.Add(Check("Show app icons on tabs", pending.ShowIcons, v => { pending.ShowIcons = v; preview?.Invalidate(); Changed(); }));
-        c.Add(Check("Fade smoothly between windows when switching tabs", pending.SmoothSwitch, v => { pending.SmoothSwitch = v; Changed(); },
-            Crossfade.WindowsAnimates() ? null : "Windows animation effects are off, so GrpTabs switches instantly."));
         var colour = Card("Tab colour");
-        colour.Add(Note("The active tab takes this colour; the others are a lighter or darker tint of it, with text that stays readable."));
+        colour.Add(Note("Rainbow gives every tab its own colour. Pick one colour to use it on every tab. To colour a single tab, right-click it and choose Tab colour."));
         var swatches = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(CardWidth - 40, 0), BackColor = Color.Transparent, Margin = new Padding(0, 2, 0, 6) };
+        swatches.Controls.Add(Swatch("Rainbow: every tab its own colour", TabColors.Indigo, pending.TabColor == "", () => SetColour(""), rainbow: true));
         foreach (var (name, hex) in TabColors.Presets)
-            swatches.Controls.Add(Swatch(name, TabColors.Parse(hex)!.Value, pending.TabColor == hex || (pending.TabColor == "" && hex == "#4F46E5"), () => SetColour(hex == "#4F46E5" ? "" : hex)));
+            swatches.Controls.Add(Swatch(name, TabColors.Parse(hex)!.Value, pending.TabColor == hex, () => SetColour(hex)));
         var accent = Palette.WindowsAccent();
         swatches.Controls.Add(Swatch(accent is null ? "Windows accent colour (not found)" : "Windows accent colour", accent ?? Color.Gray, pending.TabColor == "accent", () => SetColour("accent"), ring: true));
         colour.Add(swatches);
@@ -280,9 +280,9 @@ internal sealed class SettingsForm : Form
         Draw();
     }
 
-    private static Control Swatch(string name, Color color, bool selected, Action pick, bool ring = false)
+    private static Control Swatch(string name, Color color, bool selected, Action pick, bool ring = false, bool rainbow = false)
     {
-        var b = new SwatchButton(color, selected, ring) { Size = new Size(36, 36), Margin = new Padding(0, 0, 8, 8), AccessibleName = name };
+        var b = new SwatchButton(color, selected, ring, rainbow) { Size = new Size(36, 36), Margin = new Padding(0, 0, 8, 8), AccessibleName = name };
         new ToolTip().SetToolTip(b, name);
         b.Click += (_, _) => pick();
         return b;
@@ -505,7 +505,7 @@ internal sealed class PreviewPanel : Panel
     protected override void OnPaint(PaintEventArgs e)
     {
         var s = st();
-        var pal = Palette.For(s);
+        var basePal = Palette.For(s);
         var g = e.Graphics;
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using (var hatch = new HatchBrush(HatchStyle.WideUpwardDiagonal, Color.FromArgb(230, 233, 242), Color.FromArgb(240, 242, 248))) g.FillRectangle(hatch, ClientRectangle);
@@ -518,7 +518,8 @@ internal sealed class PreviewPanel : Panel
         for (int i = 0; i < titles.Length; i++)
         {
             bool on = i == 0;
-            int w = Math.Min(s.TabWidth, TextRenderer.MeasureText(titles[i], font).Width + (s.ShowIcons ? 40 : 22));
+            var pal = s.TabColor == "" ? Palette.For(TabColors.RainbowColor(i), s) : basePal;
+            int w = Math.Min(s.TabWidth, TextRenderer.MeasureText(titles[i], font).Width + (s.ShowIcons ? 40 : 22) + (s.CloseButtons && on ? 22 : 0));
             var r = new Rectangle(x, on ? 12 : 14, w, on ? 28 : 26);
             using var path = new GraphicsPath();
             path.AddArc(r.X, r.Y, 16, 16, 180, 90);
@@ -530,7 +531,7 @@ internal sealed class PreviewPanel : Panel
             int tx = r.X + 10;
             if (s.ShowIcons) { using var ib = new SolidBrush(on ? pal.OnInk : pal.On); g.FillRectangle(ib, tx, r.Y + r.Height / 2 - 7, 14, 14); tx += 20; }
             int right = r.Right - 4 - (s.CloseButtons && on ? 20 : 0);
-            TextRenderer.DrawText(g, titles[i], font, new Rectangle(tx, r.Y, right - tx, r.Height), on ? pal.OnInk : pal.TabInk, on ? pal.On : pal.Tab, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+            TextRenderer.DrawText(g, titles[i], font, new Rectangle(tx, r.Y, right - tx, r.Height), on ? pal.OnInk : pal.TabInk, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
             if (s.CloseButtons && on)
             {
                 using var pen = new Pen(pal.OnInk, 1.4f);
@@ -547,13 +548,14 @@ internal sealed class PreviewPanel : Panel
 internal sealed class SwatchButton : Button
 {
     private readonly Color color;
-    private readonly bool selected, accent;
+    private readonly bool selected, accent, rainbow;
 
-    public SwatchButton(Color color, bool selected, bool accent)
+    public SwatchButton(Color color, bool selected, bool accent, bool rainbow = false)
     {
         this.color = color;
         this.selected = selected;
         this.accent = accent;
+        this.rainbow = rainbow;
         FlatStyle = FlatStyle.Flat;
         FlatAppearance.BorderSize = 0;
         FlatAppearance.MouseOverBackColor = Color.White;
@@ -566,15 +568,26 @@ internal sealed class SwatchButton : Button
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.Clear(Parent?.BackColor ?? Color.White);
+        // A transparent parent would clear to black: use the first solid colour up the tree (the card).
+        Control? solid = Parent;
+        while (solid is not null && solid.BackColor.A < 255) solid = solid.Parent;
+        g.Clear(solid?.BackColor ?? Color.White);
         g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         var r = new Rectangle(4, 4, Width - 9, Height - 9);
-        if (selected) { using var ring = new Pen(color, 2.4f); g.DrawEllipse(ring, 1, 1, Width - 3, Height - 3); }
-        using (var fill = new SolidBrush(color)) g.FillEllipse(fill, r);
+        if (selected) { using var ring = new Pen(rainbow ? GrpTabs.Core.TabColors.Indigo : color, 2.4f); g.DrawEllipse(ring, 1, 1, Width - 3, Height - 3); }
+        if (rainbow)
+        {
+            // A pie of the rainbow colours.
+            var rb = GrpTabs.Core.TabColors.Rainbow;
+            float sweep = 360f / rb.Count;
+            for (int i = 0; i < rb.Count; i++)
+                using (var fill = new SolidBrush(GrpTabs.Core.TabColors.Parse(rb[i].Hex)!.Value)) g.FillPie(fill, r, -90 + i * sweep, sweep + 0.5f);
+        }
+        else using (var fill = new SolidBrush(color)) g.FillEllipse(fill, r);
         if (accent) { using var inner = new Pen(Color.White, 2f); g.DrawEllipse(inner, r.X + 5, r.Y + 5, r.Width - 10, r.Height - 10); }
         if (selected)
         {
-            using var tick = new Pen(GrpTabs.Core.TabColors.InkOn(color), 2.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
+            using var tick = new Pen(rainbow ? Color.White : GrpTabs.Core.TabColors.InkOn(color), 2.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
             int cx = Width / 2, cy = Height / 2;
             g.DrawLines(tick, new[] { new Point(cx - 5, cy), new Point(cx - 1, cy + 4), new Point(cx + 6, cy - 4) });
         }

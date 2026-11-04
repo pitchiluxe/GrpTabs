@@ -15,6 +15,10 @@ internal static class Palette
     /// <summary>The tab colours for these settings: the chosen colour (or Windows accent), light or dark.</summary>
     public static TabPalette For(Settings st) => TabColors.Derive(BaseColor(st.TabColor), IsDark(st.Theme));
 
+    /// <summary>The palette for one tab of colour <paramref name="c"/>, light or dark.</summary>
+    public static TabPalette For(Color c, Settings st) => TabColors.Derive(c, IsDark(st.Theme));
+
+    /// <summary>The one colour of a single-colour setting (rainbow and unknown values give indigo).</summary>
     public static Color BaseColor(string tabColor) =>
         tabColor == "accent" ? WindowsAccent() ?? TabColors.Indigo : TabColors.Parse(tabColor) ?? TabColors.Indigo;
 

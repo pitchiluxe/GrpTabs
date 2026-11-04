@@ -15,6 +15,11 @@ internal sealed class Engine : IDisposable
     private readonly GroupModel groups = new();
     private readonly Dictionary<IntPtr, TabStrip> strips = new();
     private readonly HashSet<IntPtr> hiddenByUs = new();
+    /// <summary>Rainbow slot per window: given once, so a tab keeps its colour while you move it around.</summary>
+    private readonly Dictionary<IntPtr, int> slots = new();
+    /// <summary>Colours picked for single tabs from the tab menu.</summary>
+    private readonly Dictionary<IntPtr, Color> picked = new();
+    private int nextSlot;
     /// <summary>Windows we just showed: DWM keeps them cloaked during the show animation, which is not a reason to drop their tabs.</summary>
     private readonly Dictionary<IntPtr, long> shownAt = new();
     private readonly Dictionary<IntPtr, (Native.WINDOWPLACEMENT Place, Native.RECT Frame)> lastPlace = new();
@@ -98,6 +103,12 @@ internal sealed class Engine : IDisposable
                 if (strips.TryGetValue(hwnd, out var s2)) { Remember(hwnd); s2.Reposition(); }
                 break;
             case Native.EVENT_SYSTEM_FOREGROUND:
+                if (!selfChange && hiddenByUs.Contains(hwnd) && groups.GroupOf(hwnd) is { } fg && fg.Active != hwnd)
+                {
+                    // A waiting tab was picked from the taskbar or Alt+Tab: it becomes the shown tab.
+                    ActivateTab(hwnd);
+                    break;
+                }
                 Refresh(hwnd);
                 // Any window coming forward changes the stacking: every strip re-seats itself above its window.
                 foreach (var s5 in strips.Values) s5.KeepAbove();
@@ -106,7 +117,7 @@ internal sealed class Engine : IDisposable
             case Native.EVENT_OBJECT_UNCLOAKED:
             case Native.EVENT_SYSTEM_MINIMIZEEND:
                 if (selfChange) break;
-                if (hiddenByUs.Contains(hwnd) && Native.IsWindowVisible(hwnd))
+                if (hiddenByUs.Contains(hwnd) && Native.IsWindowVisible(hwnd) && !IsParked(hwnd))
                 {
                     // The app showed a window we had hidden (it was restored from its own tray icon, for example): make it the active tab.
                     hiddenByUs.Remove(hwnd);
@@ -149,6 +160,8 @@ internal sealed class Engine : IDisposable
     private void Destroyed(IntPtr hwnd)
     {
         icons.Remove(hwnd);
+        slots.Remove(hwnd);
+        picked.Remove(hwnd);
         hiddenByUs.Remove(hwnd);
         var g = groups.GroupOf(hwnd);
         if (g is not null)
@@ -168,6 +181,46 @@ internal sealed class Engine : IDisposable
     // ------------------------------------------------------------------ strips
 
     public IntPtr ActiveOf(IntPtr target) => groups.GroupOf(target)?.Active ?? target;
+
+    /// <summary>
+    /// A tab's colour: one you picked for it, else its own rainbow colour (the default),
+    /// else the single colour chosen in Settings > Appearance.
+    /// </summary>
+    public Color ColourOf(IntPtr hwnd)
+    {
+        if (picked.TryGetValue(hwnd, out var c)) return c;
+        if (Settings.TabColor != "") return Palette.BaseColor(Settings.TabColor);
+        return TabColors.RainbowColor(SlotOf(hwnd));
+    }
+
+    public bool HasPickedColour(IntPtr hwnd) => picked.ContainsKey(hwnd);
+
+    /// <summary>Give one tab its own colour; null goes back to automatic.</summary>
+    public void SetTabColour(IntPtr hwnd, Color? colour)
+    {
+        if (colour is { } c) picked[hwnd] = c; else picked.Remove(hwnd);
+        Refresh(ActiveOf(hwnd));
+    }
+
+    private int SlotOf(IntPtr hwnd)
+    {
+        if (slots.TryGetValue(hwnd, out var s)) return s;
+        var used = groups.TabsFor(hwnd).Where(m => m != hwnd && slots.ContainsKey(m)).Select(m => slots[m]).ToList();
+        s = TabColors.PickSlot(used, nextSlot);
+        nextSlot = s + 1;
+        slots[hwnd] = s;
+        return s;
+    }
+
+    /// <summary>A window that joins a group gets a new colour if one of its new neighbours already has its colour.</summary>
+    private void KeepColoursDistinct(IntPtr member)
+    {
+        if (!slots.TryGetValue(member, out var mine)) return;
+        var others = groups.TabsFor(member).Where(m => m != member && slots.ContainsKey(m)).Select(m => slots[m]).ToList();
+        if (!others.Contains(mine)) return;
+        slots[member] = TabColors.PickSlot(others, nextSlot);
+        nextSlot = slots[member] + 1;
+    }
 
     public IReadOnlyList<TabGroup> Groups => groups.Groups;
 
@@ -281,13 +334,22 @@ internal sealed class Engine : IDisposable
         if (src.Place.length == 0) { Show(to); return; }
         var wp = src.Place;
         bool max = wp.showCmd == Native.SW_SHOWMAXIMIZED;
-        wp.showCmd = max ? Native.SW_SHOWMAXIMIZED : Native.SW_SHOWNORMAL;
+        // A parked tab is already shown, just off-screen: moving it in place is instant. Showing a hidden
+        // window would make Windows 11 cloak it for a third of a second while it plays its open animation.
+        bool parked = Native.IsWindowVisible(to) && !Native.IsIconic(to);
+        wp.showCmd = max ? Native.SW_SHOWMAXIMIZED : parked ? Native.SW_SHOWNOACTIVATE : Native.SW_SHOWNORMAL;
         wp.flags = 0;
         selfChange = true;
         try
         {
             hiddenByUs.Remove(to);
-            Native.SetWindowPlacement(to, ref wp);
+            if (parked && max && Native.IsZoomed(to))
+                // Windows ignores "maximize" for a window that is already maximized, so move it onto the monitor itself.
+                MoveMaximized(to, new Rectangle(src.Frame.Left, src.Frame.Top, src.Frame.Width, src.Frame.Height), Native.IsWindow(from) && from != to ? from : IntPtr.Zero);
+            else Native.SetWindowPlacement(to, ref wp);
+            // Slide in just behind the window it replaces; activating it then brings it forward.
+            if (parked && !max && from != to && Native.IsWindow(from) && Native.IsWindowVisible(from))
+                Native.SetWindowPos(to, from, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_NOOWNERZORDER);
             if (!max)
             {
                 // Apps differ in their invisible borders: line the visible frames up exactly.
@@ -298,27 +360,66 @@ internal sealed class Engine : IDisposable
                 if (dl != 0 || dt != 0 || dr != 0 || db != 0)
                     Native.SetWindowPos(to, IntPtr.Zero, outer.Left + dl, outer.Top + dt, outer.Width - dl + dr, outer.Height - dt + db, Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
             }
-            Native.ShowWindow(to, max ? Native.SW_SHOWMAXIMIZED : Native.SW_SHOW);
+            if (!parked) Native.ShowWindow(to, max ? Native.SW_SHOWMAXIMIZED : Native.SW_SHOW);
         }
         finally { selfChange = false; }
         Remember(to);
     }
 
+    /// <summary>Where waiting tabs are parked: far outside every screen.</summary>
+    private const int ParkAt = -30000;
+
+    /// <summary>Place a maximized window over the monitor that holds <paramref name="onMonitor"/>, just behind <paramref name="after"/> (or where it is in the stacking order).</summary>
+    private static void MoveMaximized(IntPtr hwnd, Rectangle onMonitor, IntPtr after)
+    {
+        var work = Screen.FromRectangle(onMonitor).WorkingArea;
+        Native.GetWindowRect(hwnd, out var outer);
+        var frame = Native.Frame(hwnd);
+        // Keep the app's own invisible borders outside the work area, as Windows does for maximized windows.
+        int l = work.Left - (frame.Left - outer.Left), t = work.Top - (frame.Top - outer.Top);
+        int r = work.Right + (outer.Right - frame.Right), b = work.Bottom + (outer.Bottom - frame.Bottom);
+        uint flags = Native.SWP_NOACTIVATE | Native.SWP_NOOWNERZORDER | (after == IntPtr.Zero ? Native.SWP_NOZORDER : 0);
+        Native.SetWindowPos(hwnd, after, l, t, r - l, b - t, flags);
+    }
+
+    private static bool IsParked(IntPtr hwnd) => Native.GetWindowRect(hwnd, out var r) && r.Left <= ParkAt + 10000 && r.Top <= ParkAt + 10000;
+
     private void Show(IntPtr hwnd)
     {
         selfChange = true;
-        try { hiddenByUs.Remove(hwnd); Native.ShowWindow(hwnd, Native.SW_SHOW); }
+        try
+        {
+            hiddenByUs.Remove(hwnd);
+            if (IsParked(hwnd)) Unpark(hwnd);
+            else Native.ShowWindow(hwnd, Native.SW_SHOW);
+        }
         finally { selfChange = false; }
     }
 
+    /// <summary>Put a parked window back where it was when it was parked (exit, update, taking it out).</summary>
+    private void Unpark(IntPtr hwnd)
+    {
+        if (!lastPlace.TryGetValue(hwnd, out var p) || p.Place.length == 0) { Native.ShowWindow(hwnd, Native.SW_SHOWNA); return; }
+        if (Native.IsZoomed(hwnd)) { MoveMaximized(hwnd, new Rectangle(p.Frame.Left, p.Frame.Top, p.Frame.Width, p.Frame.Height), IntPtr.Zero); return; }
+        var wp = p.Place;
+        wp.showCmd = wp.showCmd == Native.SW_SHOWMAXIMIZED ? Native.SW_SHOWMAXIMIZED : Native.SW_SHOWNOACTIVATE;
+        wp.flags = 0;
+        Native.SetWindowPlacement(hwnd, ref wp);
+    }
+
+    /// <summary>
+    /// A waiting tab is parked off-screen (still shown, at the bottom of the stacking order) rather than hidden,
+    /// so switching to it later is a move, which Windows never animates. A minimized tab stays minimized.
+    /// </summary>
     private void HideMember(IntPtr hwnd)
     {
         Remember(hwnd);
         hiddenByUs.Add(hwnd);
         SaveHidden();
         DropStrip(hwnd);
+        if (Native.IsIconic(hwnd) || !Native.IsWindowVisible(hwnd)) return;
         selfChange = true;
-        try { Native.ShowWindow(hwnd, Native.SW_HIDE); }
+        try { Native.SetWindowPos(hwnd, Native.HWND_BOTTOM, ParkAt, ParkAt, 0, 0, Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_NOOWNERZORDER); }
         finally { selfChange = false; }
     }
 
@@ -344,15 +445,11 @@ internal sealed class Engine : IDisposable
         var prev = g.Active;
         if (prev != hwnd)
         {
-            var f = Native.Frame(prev);
-            bool visible = Native.IsWindowVisible(prev) && !Native.IsIconic(prev);
-            Crossfade.Run(new Rectangle(f.Left, f.Top, f.Width, f.Height), Settings.SmoothSwitch && visible, () =>
-            {
-                groups.Activate(hwnd);
-                ShowInPlaceOf(prev, hwnd);
-                MoveStrip(prev, hwnd);
-                HideMember(prev);
-            });
+            // Instant, like TidyTabs: the new window is shown in place before the old one is hidden, so nothing behind flashes through.
+            groups.Activate(hwnd);
+            ShowInPlaceOf(prev, hwnd);
+            MoveStrip(prev, hwnd);
+            HideMember(prev);
         }
         Native.Activate(hwnd);
         Refresh(hwnd);
@@ -371,6 +468,7 @@ internal sealed class Engine : IDisposable
         bool wasActive = old?.Active == w;
         var frameOwner = groups.GroupOf(target)?.Active ?? target;
         if (!groups.Join(w, target, at)) return false;
+        KeepColoursDistinct(w);
         if (sameGroup) { ActivateTab(w); return true; }
         if (wasActive) HandOff(w, before);
         ShowInPlaceOf(frameOwner, w);
@@ -394,7 +492,7 @@ internal sealed class Engine : IDisposable
         bool wasActive = g.Active == w;
         groups.Detach(w);
         if (wasActive) HandOff(w, before);
-        if (!Native.IsWindowVisible(w)) Show(w);
+        if (!Native.IsWindowVisible(w) || hiddenByUs.Contains(w)) Show(w);
         var f = Native.Frame(w);
         var p = at ?? new Point(f.Left + 40, f.Top + 40);
         if (Native.IsZoomed(w)) Native.ShowWindow(w, Native.SW_RESTORE);
@@ -424,7 +522,7 @@ internal sealed class Engine : IDisposable
     public void BeginDrag(IntPtr tab, TabStrip from)
     {
         dragging = tab;
-        ghost = new DragGhost(Native.Title(tab), IconOf(tab), from.UiScale, Palette.For(Settings).On);
+        ghost = new DragGhost(Native.Title(tab), IconOf(tab), from.UiScale, ColourOf(tab));
         ghost.MoveTo(Cursor.Position);
         ghost.Show();
     }
@@ -481,7 +579,22 @@ internal sealed class Engine : IDisposable
     }
 
     /// <summary>Ask a window to close, as its own X button does (it may ask to save).</summary>
-    public void CloseTab(IntPtr hwnd) => Native.PostMessage(hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    public void CloseTab(IntPtr hwnd)
+    {
+        if (hiddenByUs.Contains(hwnd) && IsParked(hwnd) && !Native.IsZoomed(hwnd))
+        {
+            // Apps save their position when they close: put the window back in place (behind the shown tab) first.
+            selfChange = true;
+            try
+            {
+                Unpark(hwnd);
+                var shown = ActiveOf(hwnd);
+                if (shown != hwnd) Native.SetWindowPos(hwnd, shown, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE | Native.SWP_NOOWNERZORDER);
+            }
+            finally { selfChange = false; }
+        }
+        Native.PostMessage(hwnd, Native.WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+    }
 
     /// <summary>Switch the group shown in <paramref name="target"/>'s frame one tab along (mouse wheel).</summary>
     public void CycleGroup(IntPtr target, int dir)
@@ -510,6 +623,40 @@ internal sealed class Engine : IDisposable
                 GroupInto(w, groups.GroupOf(target)?.Active ?? target);
     }
 
+    /// <summary>Tab menu > Tab colour: automatic, the presets, or any colour.</summary>
+    private ToolStripMenuItem ColourMenu(IntPtr tab)
+    {
+        var item = new ToolStripMenuItem("Tab colour", Dot(ColourOf(tab)));
+        bool rainbow = Settings.TabColor == "";
+        var autoColour = rainbow ? TabColors.RainbowColor(SlotOf(tab)) : Palette.BaseColor(Settings.TabColor);
+        item.DropDownItems.Add(new ToolStripMenuItem(rainbow ? "Automatic (rainbow)" : "Automatic (from Settings)", Dot(autoColour),
+            (_, _) => SetTabColour(tab, null)) { Checked = !HasPickedColour(tab) });
+        item.DropDownItems.Add(new ToolStripSeparator());
+        var current = picked.TryGetValue(tab, out var pc) ? TabColors.Hex(pc) : "";
+        foreach (var (name, hex) in TabColors.Presets)
+        {
+            var c = TabColors.Parse(hex)!.Value;
+            item.DropDownItems.Add(new ToolStripMenuItem(name, Dot(c), (_, _) => SetTabColour(tab, c)) { Checked = current == hex });
+        }
+        item.DropDownItems.Add(new ToolStripSeparator());
+        item.DropDownItems.Add("Custom colour...", null, (_, _) =>
+        {
+            using var dlg = new ColorDialog { FullOpen = true, AnyColor = true, Color = ColourOf(tab) };
+            if (dlg.ShowDialog() == DialogResult.OK) SetTabColour(tab, dlg.Color);
+        });
+        return item;
+    }
+
+    private static Bitmap Dot(Color c)
+    {
+        var b = new Bitmap(16, 16);
+        using var g = Graphics.FromImage(b);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        using var br = new SolidBrush(c);
+        g.FillEllipse(br, 2, 2, 12, 12);
+        return b;
+    }
+
     public void ShowTabMenu(TabStrip strip, IntPtr tab, Point screen)
     {
         var members = groups.TabsFor(strip.Target);
@@ -519,6 +666,8 @@ internal sealed class Engine : IDisposable
         menu.Items.Add("Close tab", null, (_, _) => CloseTab(tab));
         menu.Items.Add("Close other tabs", null, (_, _) => { foreach (var m in members.ToList()) if (m != tab) CloseTab(m); }).Enabled = members.Count > 1;
         menu.Items.Add("Close group", null, (_, _) => { foreach (var m in members.ToList()) CloseTab(m); }).Enabled = members.Count > 1;
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(ColourMenu(tab));
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Move tab left", null, (_, _) => MoveTab(tab, -1)).Enabled = index > 0;
         menu.Items.Add("Move tab right", null, (_, _) => MoveTab(tab, 1)).Enabled = index >= 0 && index < members.Count - 1;
@@ -570,13 +719,18 @@ internal sealed class Engine : IDisposable
         try
         {
             Directory.CreateDirectory(Settings.Folder);
-            var list = hiddenByUs.Where(Native.IsWindow).Select(h => new HiddenEntry(h.ToInt64(), WindowInfo.Pid(h), Native.Title(h))).ToList();
+            var list = hiddenByUs.Where(Native.IsWindow).Select(h =>
+            {
+                var p = lastPlace.TryGetValue(h, out var v) ? v.Place : default;
+                var r = p.rcNormalPosition;
+                return new HiddenEntry(h.ToInt64(), WindowInfo.Pid(h), Native.Title(h), r.Left, r.Top, r.Right, r.Bottom, p.showCmd == Native.SW_SHOWMAXIMIZED);
+            }).ToList();
             File.WriteAllText(HiddenFile, JsonSerializer.Serialize(list));
         }
         catch (IOException) { /* best effort: the in-memory list still restores them on exit */ }
     }
 
-    private record HiddenEntry(long Hwnd, uint Pid, string Title);
+    private record HiddenEntry(long Hwnd, uint Pid, string Title, int L = 0, int T = 0, int R = 0, int B = 0, bool Max = false);
 
     /// <summary>After a crash or a forced stop, show any window GrpTabs had hidden that still exists.</summary>
     private static void RecoverHidden()
@@ -588,7 +742,19 @@ internal sealed class Engine : IDisposable
             foreach (var e in list)
             {
                 var h = new IntPtr(e.Hwnd);
-                if (Native.IsWindow(h) && WindowInfo.Pid(h) == e.Pid && !Native.IsWindowVisible(h)) Native.ShowWindow(h, Native.SW_SHOWNA);
+                if (!Native.IsWindow(h) || WindowInfo.Pid(h) != e.Pid) continue;
+                if (!Native.IsWindowVisible(h)) Native.ShowWindow(h, Native.SW_SHOWNA);   // hidden by GrpTabs 1.1 or older
+                else if (IsParked(h) && Native.IsZoomed(h) && e.R > e.L && e.B > e.T)
+                    MoveMaximized(h, new Rectangle(e.L, e.T, e.R - e.L, e.B - e.T), IntPtr.Zero);
+                else if (IsParked(h) && e.R > e.L && e.B > e.T)
+                {
+                    var wp = Native.WINDOWPLACEMENT.Default;
+                    Native.GetWindowPlacement(h, ref wp);
+                    wp.rcNormalPosition = new Native.RECT { Left = e.L, Top = e.T, Right = e.R, Bottom = e.B };
+                    wp.showCmd = e.Max ? Native.SW_SHOWMAXIMIZED : Native.SW_SHOWNOACTIVATE;
+                    wp.flags = 0;
+                    Native.SetWindowPlacement(h, ref wp);
+                }
             }
             File.Delete(HiddenFile);
         }
@@ -599,7 +765,11 @@ internal sealed class Engine : IDisposable
     public void RestoreAll()
     {
         foreach (var h in hiddenByUs.ToList())
-            if (Native.IsWindow(h)) Native.ShowWindow(h, Native.SW_SHOWNA);
+        {
+            if (!Native.IsWindow(h)) continue;
+            if (IsParked(h)) Unpark(h);
+            else if (!Native.IsWindowVisible(h)) Native.ShowWindow(h, Native.SW_SHOWNA);
+        }
         hiddenByUs.Clear();
         try { File.Delete(HiddenFile); } catch (IOException) { }
     }

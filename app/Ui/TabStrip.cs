@@ -150,7 +150,7 @@ internal sealed class TabStrip : Form
     {
         var active = engine.ActiveOf(Target);
         return string.Join('|', size.Width, size.Height, UiScale, st.TabColor, st.Theme, Palette.IsDark(st.Theme), st.ShowIcons, st.CloseButtons, st.TabWidth,
-            DropHighlight, hoverTab, hoverClose, active, string.Join(',', Tabs.Select(t => $"{t}:{Native.Title(t)}")));
+            DropHighlight, hoverTab, hoverClose, active, string.Join(',', Tabs.Select(t => $"{t}:{engine.ColourOf(t).ToArgb()}:{Native.Title(t)}")));
     }
 
     private Font? font;
@@ -191,7 +191,6 @@ internal sealed class TabStrip : Form
     {
         image?.Dispose();
         image = new Bitmap(Math.Max(1, size.Width), Math.Max(1, size.Height), PixelFormat.Format32bppPArgb);
-        var pal = Palette.For(st);
         using var g = Graphics.FromImage(image);
         g.Clear(Color.Transparent);
         g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -204,6 +203,7 @@ internal sealed class TabStrip : Form
         {
             if (box.Left >= size.Width) break;
             bool on = hwnd == active;
+            var pal = Palette.For(engine.ColourOf(hwnd), st);
             int inset = on ? 0 : (int)(2 * UiScale);
             var rect = new Rectangle(box.X, box.Y + inset, Math.Min(box.Width, size.Width - box.X - 1), box.Height - inset);
             using (var path = Rounded(rect, r))
@@ -236,7 +236,7 @@ internal sealed class TabStrip : Form
         }
         if (DropHighlight)
         {
-            using var pen = new Pen(pal.On, 2 * UiScale);
+            using var pen = new Pen(engine.ColourOf(active), 2 * UiScale);
             g.DrawRectangle(pen, 1, 1, size.Width - 3, size.Height - 3);
         }
     }

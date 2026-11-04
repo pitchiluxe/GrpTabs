@@ -37,12 +37,52 @@ public class TabColorTests
     [Fact]
     public void Settings_repair_a_bad_colour_and_keep_new_switches()
     {
+        // SmoothSwitch was a 1.1 setting: an old settings file that still has it loads fine.
         var s = Settings.Parse("""{"TabColor":"#zzzzzz","CloseButtons":false,"SmoothSwitch":false}""");
         Assert.Equal("", s.TabColor);
         Assert.False(s.CloseButtons);
-        Assert.False(s.SmoothSwitch);
         var d = new Settings();
-        Assert.True(d.WheelSwitches && d.NumberHotkeys && d.HideInFullScreen && d.SmoothSwitch && d.CloseButtons);
+        Assert.True(d.WheelSwitches && d.NumberHotkeys && d.HideInFullScreen && d.CloseButtons);
+        Assert.Equal("", d.TabColor); // rainbow by default
+    }
+
+    [Fact]
+    public void Older_settings_move_to_rainbow_once_and_later_choices_stay()
+    {
+        Assert.Equal("", Settings.Parse("""{"TabColor":"#0F766E"}""").TabColor);
+        var kept = Settings.Parse("""{"TabColor":"#0F766E","Version":2}""");
+        Assert.Equal("#0F766E", kept.TabColor);
+        Assert.Equal(2, kept.Version);
+        var fresh = new Settings { TabColor = "#B45309" };
+        Assert.Equal("#B45309", Settings.Parse(fresh.ToJson()).TabColor);
+    }
+
+    [Fact]
+    public void Rainbow_gives_neighbouring_tabs_different_colours()
+    {
+        Assert.Equal(0, TabColors.PickSlot(new int[0], 0));
+        Assert.Equal(3, TabColors.PickSlot(new[] { 0, 1 }, 3));
+        Assert.Equal(2, TabColors.PickSlot(new[] { 0, 1 }, 1));   // 1 is taken: next free
+        Assert.Equal(0, TabColors.PickSlot(new[] { 7, 8 }, 7));   // wraps round
+        var all = Enumerable.Range(0, TabColors.Rainbow.Count).ToArray();
+        Assert.Equal(4, TabColors.PickSlot(all, 4));              // more tabs than colours: repeats
+        var picked = new List<int>();
+        for (int i = 0; i < TabColors.Rainbow.Count; i++) picked.Add(TabColors.PickSlot(picked, 0));
+        Assert.Equal(TabColors.Rainbow.Count, picked.Distinct().Count());
+    }
+
+    [Fact]
+    public void Rainbow_colours_are_distinct_presets()
+    {
+        Assert.Equal(TabColors.Rainbow.Count, TabColors.Rainbow.Select(r => r.Hex).Distinct().Count());
+        Assert.All(TabColors.Rainbow, r => Assert.Contains(TabColors.Presets, p => p.Hex == r.Hex));
+        Assert.Equal(TabColors.Parse("#DC2626"), TabColors.RainbowColor(TabColors.Rainbow.Count));
+        // Every rainbow colour is used once per round, and neighbours are never next to each other in the spectrum.
+        var round = Enumerable.Range(0, TabColors.Rainbow.Count).Select(TabColors.RainbowColor).ToList();
+        Assert.Equal(TabColors.Rainbow.Count, round.Distinct().Count());
+        var spectrum = TabColors.Rainbow.Select(r => TabColors.Parse(r.Hex)!.Value).ToList();
+        for (int i = 1; i < round.Count; i++)
+            Assert.True(Math.Abs(spectrum.IndexOf(round[i]) - spectrum.IndexOf(round[i - 1])) > 1, $"tabs {i - 1} and {i} are spectrum neighbours");
     }
 }
 

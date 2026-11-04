@@ -15,6 +15,8 @@ internal static class Native
     public const uint WM_CLOSE = 0x0010, WM_GETICON = 0x007F, WM_SYSCOMMAND = 0x0112, WM_HOTKEY = 0x0312;
     public const int ICON_SMALL = 0, ICON_BIG = 1, ICON_SMALL2 = 2, GCLP_HICONSM = -34, GCLP_HICON = -14;
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAKED = 14;
+    public static readonly IntPtr HWND_BOTTOM = new(1);
+    public const int SW_SHOWNOACTIVATE = 4;
     public const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040, SWP_NOOWNERZORDER = 0x0200;
     public const uint MOD_ALT = 0x1, MOD_CONTROL = 0x2, MOD_SHIFT = 0x4, MOD_WIN = 0x8, MOD_NOREPEAT = 0x4000;
 

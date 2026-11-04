@@ -11,7 +11,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>GrpTabs</AssemblyName>
     <RootNamespace>GrpTabs</RootNamespace>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>GrpTabs</Product>
     <Company>Erick Omari</Company>
     <Authors>Erick Omari</Authors>

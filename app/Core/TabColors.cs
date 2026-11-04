@@ -10,14 +10,40 @@ public static class TabColors
 {
     public static readonly Color Indigo = Color.FromArgb(79, 70, 229);
 
-    /// <summary>The swatches in Settings > Appearance.</summary>
-    public static readonly IReadOnlyList<(string Name, string Hex)> Presets = new[]
+    /// <summary>The rainbow, in spectrum order: with the default setting each tab takes the next one.</summary>
+    public static readonly IReadOnlyList<(string Name, string Hex)> Rainbow = new[]
     {
-        ("Indigo", "#4F46E5"), ("Ocean", "#0369A1"), ("Teal", "#0F766E"), ("Forest", "#15803D"),
-        ("Amber", "#B45309"), ("Coral", "#C2410C"), ("Rose", "#BE123C"), ("Plum", "#86198F"), ("Graphite", "#374151"),
+        ("Red", "#DC2626"), ("Orange", "#C2410C"), ("Gold", "#A16207"), ("Green", "#15803D"), ("Teal", "#0F766E"),
+        ("Blue", "#1D4ED8"), ("Indigo", "#4F46E5"), ("Violet", "#7E22CE"), ("Pink", "#BE185D"),
     };
 
-    /// <summary>"", "accent" or "#RRGGBB" (upper case); anything else becomes "".</summary>
+    /// <summary>The single-colour swatches in Settings > Appearance and the tab menu.</summary>
+    public static readonly IReadOnlyList<(string Name, string Hex)> Presets = Rainbow.Append(("Graphite", "#374151")).ToArray();
+
+    /// <summary>The order tabs take the rainbow colours in: neighbours far apart on the colour wheel, so tabs side by side never look alike.</summary>
+    private static readonly int[] SlotOrder = { 0, 5, 2, 7, 3, 8, 4, 6, 1 };
+
+    public static Color RainbowColor(int slot) => Parse(Rainbow[SlotOrder[((slot % Rainbow.Count) + Rainbow.Count) % Rainbow.Count]].Hex)!.Value;
+
+    /// <summary>
+    /// The rainbow slot for a window joining tabs that already use <paramref name="used"/>:
+    /// the first free slot from <paramref name="next"/> on, so tabs side by side never share a colour
+    /// (until a group has more tabs than the rainbow has colours).
+    /// </summary>
+    public static int PickSlot(IEnumerable<int> used, int next)
+    {
+        int n = Rainbow.Count;
+        var taken = used.Select(u => ((u % n) + n) % n).ToHashSet();
+        int start = ((next % n) + n) % n;
+        for (int i = 0; i < n; i++)
+        {
+            int s = (start + i) % n;
+            if (!taken.Contains(s)) return s;
+        }
+        return start;
+    }
+
+    /// <summary>"" (rainbow), "accent" or "#RRGGBB" (upper case); anything else becomes "" (rainbow).</summary>
     public static string Normalize(string? value)
     {
         var v = (value ?? "").Trim();
@@ -61,9 +87,10 @@ public static class TabColors
     public static TabPalette Derive(Color on, bool dark)
     {
         var bg = dark ? Color.FromArgb(32, 33, 44) : Color.White;
-        var tab = dark ? Mix(on, bg, 0.72) : Mix(on, bg, 0.84);
-        var hover = dark ? Mix(on, bg, 0.58) : Mix(on, bg, 0.72);
-        var line = dark ? Mix(on, bg, 0.45) : Mix(on, bg, 0.55);
+        // Other tabs keep enough of their colour to be told apart at a glance (rainbow tabs).
+        var tab = dark ? Mix(on, bg, 0.5) : Mix(on, bg, 0.7);
+        var hover = dark ? Mix(on, bg, 0.36) : Mix(on, bg, 0.56);
+        var line = dark ? Mix(on, bg, 0.25) : Mix(on, bg, 0.4);
         return new TabPalette(tab, InkOn(tab), line, on, InkOn(on), hover, Color.FromArgb(196, 43, 28));
     }
 }

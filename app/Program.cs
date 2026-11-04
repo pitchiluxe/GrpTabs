@@ -31,6 +31,8 @@ internal static class Program
         var tray = new Tray(args.Contains("--startup", StringComparer.OrdinalIgnoreCase));
         var listener = new Thread(() => { while (signal.WaitOne()) Tray.OpenSettings(); }) { IsBackground = true, Name = "GrpTabs show" };
         listener.Start();
+        // Signing out or shutting down: bring parked tabs back before apps close and save their positions.
+        Microsoft.Win32.SystemEvents.SessionEnding += (_, _) => { try { Tray.ShutdownEngine(); } catch (Exception) { } };
         Application.Run(tray);
     }
 
